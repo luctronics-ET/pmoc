@@ -230,7 +230,7 @@ html,body{margin:0;padding:0;height:100%;background:#F0F2F5;font-family:-apple-s
 #dh-predio{font-size:13px;color:#666}
 #drawer-body{overflow-y:auto;flex:1;padding:16px;-webkit-overflow-scrolling:touch}
 #drawer-body::-webkit-scrollbar{display:none}
-#drawer-footer{padding:12px 16px calc(12px + env(safe-area-inset-bottom,0));border-top:1px solid #F0F0F0;display:flex;gap:8px;flex-shrink:0}
+#drawer-footer{padding:12px 16px calc(12px + env(safe-area-inset-bottom,0));border-top:1px solid #F0F0F0;display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0}
 
 /* ═══════════════════════════════════════════
    DETAIL SECTIONS
@@ -277,6 +277,31 @@ html,body{margin:0;padding:0;height:100%;background:#F0F2F5;font-family:-apple-s
 .btn-danger{background:#FDECEA;color:#E52207;border:none;border-radius:10px;padding:13px 16px;font-size:14px;font-weight:700;cursor:pointer}
 .btn-success{background:#168821;color:#fff;border:none;border-radius:10px;padding:13px 16px;font-size:14px;font-weight:700;cursor:pointer}
 .btn-sm{padding:7px 12px;font-size:12px;font-weight:700;border-radius:8px;border:none;cursor:pointer}
+.btn-grow{flex:1}
+
+.med-box{display:grid;gap:6px;margin-top:8px}
+.med-note{font-size:11px;color:#666}
+.med-chip{font-size:11px;border-radius:8px;padding:7px 9px;line-height:1.35}
+.med-ok{background:#E6F4EA;color:#168821}
+.med-alerta{background:#FDECEA;color:#B71C1C}
+.med-neutro{background:#F3F4F6;color:#555}
+.med-preview{margin-top:8px}
+.hint{font-size:11px;color:#666;line-height:1.4}
+
+#dash-charts{display:grid;grid-template-columns:1fr;gap:10px}
+
+@media (max-width: 420px){
+  .dfields2,.fg2{grid-template-columns:1fr}
+  .sec-head{flex-wrap:wrap;gap:6px}
+  .sec-ordem{max-width:100%;width:100%;margin:0}
+  #drawer-body{padding:12px}
+  #drawer-hdr{padding:14px 12px 10px}
+  #drawer-footer{padding:12px}
+  #drawer-footer .btn-primary,#drawer-footer .btn-secondary{flex:1}
+}
+@media (min-width: 980px){
+  #dash-charts{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 
 /* ═══════════════════════════════════════════
    TOAST
@@ -352,7 +377,8 @@ const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
 function dbToEquip(r) {
   return {
     id: r.id, area: r.area, predio: r.predio, local: r.local,
-    tipo: r.tipo, fabricante: r.fabricante || '', btu: r.btu || 0,
+    tipo: r.tipo, fabricante: r.fabricante || '', modelo: r.modelo || '',
+    btu: r.btu || 0,
     funciona: r.funciona, estado: r.estado, obs: r.obs || '',
     refrigPermanente: r.refrig_permanente,
     horasDia: r.horas_dia, diasSemana: r.dias_semana,
@@ -360,7 +386,13 @@ function dbToEquip(r) {
     tensao: r.tensao, correnteNominal: parseFloat(r.corrente_nominal) || 0,
     patrimonio: r.patrimonio || '',
     dataInstalacao: r.data_instalacao || '',
-    ultimaManutencao: r.ultima_manutencao || ''
+    ultimaManutencao: r.ultima_manutencao || '',
+    refrigerante: r.refrigerante || '',
+    areaM2: parseFloat(r.area_m2) || 0,
+    peDireito: parseFloat(r.pe_direito) || 0,
+    nPessoas: parseInt(r.n_pessoas, 10) || 0,
+    dissipacaoW: parseFloat(r.dissipacao_w) || 0,
+    fatorInsolacao: parseFloat(r.fator_insolacao) || 1
   };
 }
 
@@ -368,7 +400,12 @@ function dbToLog(r) {
   return {
     id: r.id, date: r.data_os, tipo: r.tipo,
     status: r.status, tecnico: r.tecnico || '',
-    desc: r.descricao || '', checklist: r.checklist || []
+    desc: r.descricao || '', checklist: r.checklist || [],
+    tempInsuflamento: parseFloat(r.temp_insuflamento),
+    tempRetorno: parseFloat(r.temp_retorno),
+    deltaT: parseFloat(r.delta_t),
+    correnteMedida: parseFloat(r.corrente_medida),
+    pressaoSuccao: parseFloat(r.pressao_succao)
   };
 }
 
@@ -428,7 +465,12 @@ async function addLogEntryAsync(equipId, entry) {
     var { data, error } = await supa.from('logs_manutencao').insert({
       equip_id: equipId, data_os: entry.date, tipo: entry.tipo,
       status: entry.status, tecnico: entry.tecnico || null,
-      descricao: entry.desc || null, checklist: entry.checklist || []
+      descricao: entry.desc || null, checklist: entry.checklist || [],
+      temp_insuflamento: entry.tempInsuflamento,
+      temp_retorno: entry.tempRetorno,
+      delta_t: entry.deltaT,
+      corrente_medida: entry.correnteMedida,
+      pressao_succao: entry.pressaoSuccao
     }).select().single();
     if (error) throw error;
     if (!_logCache[equipId]) _logCache[equipId] = [];
@@ -448,6 +490,28 @@ async function delLogEntryAsync(equipId, logId) {
       _logCache[equipId] = _logCache[equipId].filter(function(e){return e.id!==logId;});
     return true;
   } catch(e) { return false; }
+}
+
+async function saveEquipAsync(equipId, dados){
+  try {
+    var atual = DATA.find(function(r){ return r.id===equipId; }) || {};
+    var payload = Object.assign(dadosEdicaoEquip(atual), dados);
+    var { data, error } = await supa.from('equipamentos')
+      .update(montarPatchEquipamento(payload))
+      .eq('id', equipId)
+      .select()
+      .single();
+    if (error) throw error;
+    var idx = DATA.findIndex(function(r){ return r.id===equipId; });
+    var equip = dbToEquip(data);
+    if (idx>=0) DATA[idx] = equip;
+    else DATA.push(equip);
+    return equip;
+  } catch(e) {
+    console.error('save equipment', e);
+    showToast('Erro ao salvar equipamento', 'error');
+    return null;
+  }
 }
 
 /* ── REALTIME ── */
@@ -567,13 +631,14 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="kpi-row" id="kpi-area"></div>
       <div id="dash-alerts-section"></div>
       <div id="dash-pmoc-section"></div>
+      <div id="dash-charts"></div>
     </div>
 
     <!-- ══ PAGE: INVENTÁRIO ══ -->
     <div class="page" id="page-inv">
       <div class="search-wrap">
         <i class="fas fa-search search-icon" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#aaa"></i>
-        <input class="search-box" id="inv-search" placeholder="Buscar local, prédio, fabricante…" oninput="renderInv()" autocomplete="off"/>
+        <input class="search-box" id="inv-search" placeholder="Buscar local, prédio, fabricante, modelo…" oninput="renderInv()" autocomplete="off"/>
       </div>
       <div class="chips" id="inv-chips">
         <button class="chip active" onclick="setChip(this,'todos')">Todos</button>
@@ -734,6 +799,158 @@ function autoCrit(e){
   if(e.criticidadeManual) return e.criticidade;
   if(e.funciona==='NOK') return e.criticidade;
   return e.criticidade;
+}
+
+/* ── EDIÇÃO + MEDIÇÕES ── */
+function normalizarTextoCampo(v){
+  var txt = String(v==null ? '' : v).trim();
+  return txt || null;
+}
+function normalizarNumero(v){
+  if(v==null || v==='') return null;
+  var n = parseFloat(String(v).replace(',','.'));
+  return Number.isFinite(n) ? n : null;
+}
+function normalizarInteiro(v){
+  if(v==null || v==='') return null;
+  var n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : null;
+}
+function valorCriticidadeEquip(e){
+  return (e && e.criticidade) ? e.criticidade : 'BAIXA';
+}
+function optionsHtml(lista, atual, vazio){
+  var html = vazio ? '<option value="">'+esc(vazio)+'</option>' : '';
+  return html + lista.map(function(item){
+    var valor = typeof item === 'string' ? item : item.value;
+    var rotulo = typeof item === 'string' ? item : item.label;
+    return '<option value="'+esc(valor)+'"'+(String(atual||'')===String(valor)?' selected':'')+'>'+esc(rotulo)+'</option>';
+  }).join('');
+}
+function faixaPressaoReferencia(refrigerante){
+  var ref = String(refrigerante||'').toUpperCase();
+  if(ref.indexOf('410')>=0) return {min:110, max:130, rotulo:'110–130 psi (R410A)'};
+  if(ref.indexOf('22')>=0) return {min:60, max:70, rotulo:'60–70 psi (R22)'};
+  return null;
+}
+function analisarMedicoes(equip, medidas){
+  var tempIns = normalizarNumero(medidas && medidas.tempInsuflamento);
+  var tempRet = normalizarNumero(medidas && medidas.tempRetorno);
+  var deltaT = normalizarNumero(medidas && medidas.deltaT);
+  var corrente = normalizarNumero(medidas && medidas.correnteMedida);
+  var pressao = normalizarNumero(medidas && medidas.pressaoSuccao);
+  if(deltaT==null && tempIns!=null && tempRet!=null) deltaT = Number((tempRet - tempIns).toFixed(1));
+  var itens = [];
+  if(deltaT!=null){
+    itens.push({chave:'delta_t', rotulo:'ΔT', valor:deltaT, unidade:'°C', referencia:'10–14 °C', ok:deltaT>=10 && deltaT<=14});
+  }
+  if(corrente!=null){
+    var nominal = normalizarNumero(equip && equip.correnteNominal);
+    itens.push({
+      chave:'corrente', rotulo:'Corrente', valor:corrente, unidade:'A',
+      referencia: nominal!=null ? ('±10% de '+nominal+' A') : 'Comparar com a placa',
+      ok: nominal==null ? null : (corrente>=nominal*0.9 && corrente<=nominal*1.1)
+    });
+  }
+  if(pressao!=null){
+    var faixa = faixaPressaoReferencia(equip && equip.refrigerante);
+    itens.push({
+      chave:'pressao', rotulo:'Sucção', valor:pressao, unidade:'psi',
+      referencia: faixa ? faixa.rotulo : 'Conferir refrigerante/modelo',
+      ok: faixa ? (pressao>=faixa.min && pressao<=faixa.max) : null
+    });
+  }
+  return {tempInsuflamento:tempIns, tempRetorno:tempRet, deltaT:deltaT, correnteMedida:corrente, pressaoSuccao:pressao, itens:itens};
+}
+function renderAnaliseMedicoes(equip, medidas){
+  var analise = analisarMedicoes(equip, medidas);
+  if(!analise.itens.length && analise.tempInsuflamento==null && analise.tempRetorno==null) return '';
+  var chips = analise.itens.map(function(item){
+    var cls = item.ok===true ? 'med-ok' : item.ok===false ? 'med-alerta' : 'med-neutro';
+    var rotulo = item.ok===true ? 'OK' : item.ok===false ? 'Fora da ref.' : 'Sem ref.';
+    return '<div class="med-chip '+cls+'"><strong>'+esc(item.rotulo)+':</strong> '+esc(String(item.valor))+' '+esc(item.unidade)+' · '+esc(item.referencia)+' · '+rotulo+'</div>';
+  }).join('');
+  var temps = [];
+  if(analise.tempInsuflamento!=null) temps.push('Insuflamento '+analise.tempInsuflamento+' °C');
+  if(analise.tempRetorno!=null) temps.push('Retorno '+analise.tempRetorno+' °C');
+  return '<div class="med-box">' +
+    (temps.length?'<div class="med-note">'+temps.join(' · ')+'</div>':'') +
+    chips +
+    '</div>';
+}
+function dadosEdicaoEquip(e){
+  return {
+    area: e.area,
+    predio: e.predio,
+    local: e.local,
+    tipo: e.tipo,
+    fabricante: e.fabricante,
+    modelo: e.modelo,
+    btu: e.btu,
+    funciona: e.funciona,
+    estado: e.estado,
+    obs: e.obs,
+    refrigPermanente: e.refrigPermanente,
+    horasDia: e.horasDia,
+    diasSemana: e.diasSemana,
+    criticidade: e.criticidade,
+    criticidadeManual: e.criticidadeManual,
+    tensao: e.tensao,
+    correnteNominal: e.correnteNominal,
+    patrimonio: e.patrimonio,
+    dataInstalacao: e.dataInstalacao,
+    ultimaManutencao: e.ultimaManutencao,
+    refrigerante: e.refrigerante,
+    areaM2: e.areaM2,
+    peDireito: e.peDireito,
+    nPessoas: e.nPessoas,
+    dissipacaoW: e.dissipacaoW,
+    fatorInsolacao: e.fatorInsolacao
+  };
+}
+function montarPatchEquipamento(dados){
+  return {
+    area: normalizarTextoCampo(dados.area),
+    predio: normalizarTextoCampo(dados.predio),
+    local: normalizarTextoCampo(dados.local),
+    tipo: normalizarTextoCampo(dados.tipo),
+    fabricante: normalizarTextoCampo(dados.fabricante),
+    modelo: normalizarTextoCampo(dados.modelo),
+    btu: normalizarInteiro(dados.btu),
+    funciona: normalizarTextoCampo(dados.funciona),
+    estado: normalizarTextoCampo(dados.estado),
+    obs: normalizarTextoCampo(dados.obs),
+    refrig_permanente: !!dados.refrigPermanente,
+    horas_dia: normalizarInteiro(dados.horasDia),
+    dias_semana: normalizarInteiro(dados.diasSemana),
+    criticidade: normalizarTextoCampo(dados.criticidade),
+    criticidade_manual: dados.criticidadeManual !== false,
+    tensao: normalizarInteiro(dados.tensao),
+    corrente_nominal: normalizarNumero(dados.correnteNominal),
+    patrimonio: normalizarTextoCampo(dados.patrimonio),
+    data_instalacao: dados.dataInstalacao || null,
+    ultima_manutencao: dados.ultimaManutencao || null,
+    refrigerante: normalizarTextoCampo(dados.refrigerante),
+    area_m2: normalizarNumero(dados.areaM2),
+    pe_direito: normalizarNumero(dados.peDireito),
+    n_pessoas: normalizarInteiro(dados.nPessoas),
+    dissipacao_w: normalizarNumero(dados.dissipacaoW),
+    fator_insolacao: normalizarNumero(dados.fatorInsolacao)
+  };
+}
+function deveAtualizarEquipNaConclusao(entry){
+  return !!entry && entry.status==='CONCLUÍDA' && (entry.tipo==='PREVENTIVA' || entry.tipo==='CORRETIVA');
+}
+function montarPatchConclusaoManutencao(equip, form){
+  if(!deveAtualizarEquipNaConclusao(form)) return null;
+  return {
+    funciona: form.funciona || equip.funciona,
+    estado: form.estado || equip.estado,
+    criticidade: form.criticidade || valorCriticidadeEquip(equip),
+    criticidadeManual: true,
+    obs: form.obs,
+    ultimaManutencao: form.date || equip.ultimaManutencao
+  };
 }
 
 /* ── Persistência → delegada para camada Supabase (ver bloco SDK) ── */
@@ -939,7 +1156,7 @@ function setChip(btn, val){
 function renderInv(){
   var q = (el('inv-search')||{value:''}).value.toLowerCase().trim();
   var list = DATA.filter(function(e){
-    if(q && !(e.local.toLowerCase().includes(q)||e.predio.toLowerCase().includes(q)||(e.fabricante||'').toLowerCase().includes(q))) return false;
+    if(q && !(e.local.toLowerCase().includes(q)||e.predio.toLowerCase().includes(q)||(e.fabricante||'').toLowerCase().includes(q)||(e.modelo||'').toLowerCase().includes(q))) return false;
     if(invChip==='nok') return e.funciona==='NOK';
     if(invChip==='ok') return e.funciona==='OK';
     if(invChip==='ver') return e.obs && e.obs.toLowerCase().includes('verificar');
@@ -983,6 +1200,7 @@ function renderInv(){
       '<span><i class="fas fa-clock" aria-hidden="true"></i>'+(horas||'—')+'h/sem</span>' +
       '<span><i class="fas fa-calendar-check" aria-hidden="true"></i>'+dueBadgeHtml(proxManut(e))+'</span>' +
       (e.fabricante&&e.fabricante!=='-'?'<span><i class="fas fa-industry" aria-hidden="true"></i>'+esc(e.fabricante)+'</span>':'') +
+      (e.modelo?'<span><i class="fas fa-tag" aria-hidden="true"></i>'+esc(e.modelo)+'</span>':'') +
       (e.obs?'<span style="color:#E52207"><i class="fas fa-exclamation-triangle" aria-hidden="true"></i>Obs.</span>':'')+
       '</div></div>';
   }).join('');
@@ -1202,6 +1420,92 @@ function renderAlerts(){
 function openDrawer(){ el('drawer').classList.add('open'); document.body.style.overflow='hidden'; }
 function closeDrawer(){ el('drawer').classList.remove('open'); document.body.style.overflow=''; }
 
+function renderCamposEdicaoEquip(e){
+  return '<div class="ds">' +
+    '<div class="ds-title"><i class="fas fa-edit mr1" aria-hidden="true"></i>Cadastro do Equipamento</div>' +
+    '<div class="fg2">' +
+    '<div><label class="fgl">Área</label><input class="fgi" id="eq-area" value="'+esc(e.area||'')+'"/></div>' +
+    '<div><label class="fgl">Prédio</label><input class="fgi" id="eq-predio" value="'+esc(e.predio||'')+'"/></div>' +
+    '<div class="fg-full"><label class="fgl">Local</label><input class="fgi" id="eq-local" value="'+esc(e.local||'')+'"/></div>' +
+    '<div><label class="fgl">Tipo</label><input class="fgi" id="eq-tipo" value="'+esc(e.tipo||'')+'"/></div>' +
+    '<div><label class="fgl">Fabricante</label><input class="fgi" id="eq-fabricante" value="'+esc(e.fabricante||'')+'"/></div>' +
+    '<div><label class="fgl">Modelo</label><input class="fgi" id="eq-modelo" value="'+esc(e.modelo||'')+'" placeholder="Modelo da máquina"/></div>' +
+    '<div><label class="fgl">Capacidade (BTU/h)</label><input class="fgi" id="eq-btu" type="number" min="0" value="'+esc(e.btu||'')+'"/></div>' +
+    '<div><label class="fgl">Tensão (V)</label><input class="fgi" id="eq-tensao" type="number" min="0" value="'+esc(e.tensao||'')+'"/></div>' +
+    '<div><label class="fgl">Corrente nominal (A)</label><input class="fgi" id="eq-corrente" type="number" step="0.1" min="0" value="'+esc(e.correnteNominal||'')+'"/></div>' +
+    '<div><label class="fgl">Refrigerante</label><input class="fgi" id="eq-refrigerante" value="'+esc(e.refrigerante||'')+'" placeholder="Ex.: R410A"/></div>' +
+    '<div><label class="fgl">Funciona</label><select class="fgs" id="eq-funciona">'+optionsHtml(['OK','NOK','VERIFICAR'], e.funciona, 'Selecione')+'</select></div>' +
+    '<div><label class="fgl">Estado</label><select class="fgs" id="eq-estado">'+optionsHtml(['NOVA','SEMI','VELHA'], e.estado, 'Selecione')+'</select></div>' +
+    '<div><label class="fgl">Criticidade</label><select class="fgs" id="eq-criticidade">'+optionsHtml(['CRÍTICA','ALTA','MÉDIA','BAIXA'], valorCriticidadeEquip(e))+'</select></div>' +
+    '<div><label class="fgl">Patrimônio</label><input class="fgi" id="eq-patrimonio" value="'+esc(e.patrimonio||'')+'"/></div>' +
+    '<div><label class="fgl">Data de instalação</label><input class="fgi" id="eq-instalacao" type="date" value="'+esc(e.dataInstalacao||'')+'"/></div>' +
+    '<div><label class="fgl">Última manutenção</label><input class="fgi" id="eq-ultima" type="date" value="'+esc(e.ultimaManutencao||'')+'"/></div>' +
+    '<div><label class="fgl">Horas por dia</label><input class="fgi" id="eq-horas-dia" type="number" min="0" value="'+esc(e.horasDia||'')+'"/></div>' +
+    '<div><label class="fgl">Dias por semana</label><input class="fgi" id="eq-dias-semana" type="number" min="0" max="7" value="'+esc(e.diasSemana||'')+'"/></div>' +
+    '<div class="fg-full"><label class="fgl"><input type="checkbox" id="eq-refrig-perm" '+(e.refrigPermanente?'checked':'')+' style="margin-right:8px"/>Refrigeração permanente</label></div>' +
+    '<div class="fg-full"><label class="fgl">Observações</label><textarea class="fgt" id="eq-obs" placeholder="Falhas, pendências, histórico relevante…">'+esc(e.obs||'')+'</textarea></div>' +
+    '</div></div>' +
+    '<div class="ds">' +
+    '<div class="ds-title"><i class="fas fa-calculator mr1" aria-hidden="true"></i>Parâmetros de cálculo</div>' +
+    '<div class="fg2">' +
+    '<div><label class="fgl">Área climatizada (m²)</label><input class="fgi" id="eq-area-m2" type="number" step="0.1" min="0" value="'+esc(e.areaM2||'')+'"/></div>' +
+    '<div><label class="fgl">Pé-direito (m)</label><input class="fgi" id="eq-pe-direito" type="number" step="0.1" min="0" value="'+esc(e.peDireito||'')+'"/></div>' +
+    '<div><label class="fgl">Pessoas</label><input class="fgi" id="eq-pessoas" type="number" min="0" value="'+esc(e.nPessoas||'')+'"/></div>' +
+    '<div><label class="fgl">Dissipação interna (W)</label><input class="fgi" id="eq-dissipacao" type="number" step="1" min="0" value="'+esc(e.dissipacaoW||'')+'"/></div>' +
+    '<div><label class="fgl">Fator de insolação</label><input class="fgi" id="eq-insolacao" type="number" step="0.1" min="0" value="'+esc(e.fatorInsolacao||1)+'"/></div>' +
+    '<div class="fg-full hint">Esses campos alimentam os cálculos térmico/elétrico já mostrados no dashboard e ficam vinculados ao equipamento.</div>' +
+    '</div></div>';
+}
+
+async function saveEquipForm(equipId){
+  if (window._modoObservador) { showToast('Modo somente leitura', ''); return; }
+  var salvo = await saveEquipAsync(equipId, {
+    area: val('eq-area'),
+    predio: val('eq-predio'),
+    local: val('eq-local'),
+    tipo: val('eq-tipo'),
+    fabricante: val('eq-fabricante'),
+    modelo: val('eq-modelo'),
+    btu: val('eq-btu'),
+    tensao: val('eq-tensao'),
+    correnteNominal: val('eq-corrente'),
+    refrigerante: val('eq-refrigerante'),
+    funciona: val('eq-funciona'),
+    estado: val('eq-estado'),
+    criticidade: val('eq-criticidade'),
+    criticidadeManual: true,
+    patrimonio: val('eq-patrimonio'),
+    dataInstalacao: val('eq-instalacao'),
+    ultimaManutencao: val('eq-ultima'),
+    horasDia: val('eq-horas-dia'),
+    diasSemana: val('eq-dias-semana'),
+    refrigPermanente: !!el('eq-refrig-perm').checked,
+    obs: val('eq-obs'),
+    areaM2: val('eq-area-m2'),
+    peDireito: val('eq-pe-direito'),
+    nPessoas: val('eq-pessoas'),
+    dissipacaoW: val('eq-dissipacao'),
+    fatorInsolacao: val('eq-insolacao')
+  });
+  if(!salvo) return;
+  showToast('Equipamento atualizado', 'ok');
+  renderDash(); renderInv(); renderOS(); renderPmoc(); renderAlerts();
+  openDetail(equipId);
+}
+
+function openEquipForm(id){
+  var e = DATA.find(function(r){ return r.id===id; }); if(!e) return;
+  el('dh-id').textContent = 'Editar equipamento · #'+id;
+  el('dh-local').textContent = e.local;
+  el('dh-predio').textContent = e.predio;
+  el('dh-pills').innerHTML = statusPill(e.funciona)+critPill(autoCrit(e));
+  el('drawer-body').innerHTML = renderCamposEdicaoEquip(e);
+  el('drawer-footer').innerHTML =
+    '<button class="btn-secondary btn-grow" onclick="openDetail('+id+')">Cancelar</button>' +
+    '<button class="btn-primary btn-grow" onclick="saveEquipForm('+id+')"><i class="fas fa-save mr1" aria-hidden="true"></i>Salvar equipamento</button>';
+  openDrawer();
+}
+
 function openDetail(id){
   var e = DATA.find(function(r){ return r.id===id; }); if(!e) return;
   var logs = getEquipLog(id);
@@ -1232,6 +1536,7 @@ function openDetail(id){
         '</div>' +
         (entry.tecnico?'<div class="le-tec"><i class="fas fa-user mr1" aria-hidden="true"></i>'+esc(entry.tecnico)+'</div>':'') +
         (entry.desc?'<div class="le-desc">'+esc(entry.desc)+'</div>':'') +
+        renderAnaliseMedicoes(e, entry) +
         (tot?'<div class="le-chk"><i class="fas fa-tasks mr1" aria-hidden="true"></i>'+done+'/'+tot+' itens do checklist</div>':'') +
         '<button class="le-del" onclick="delLog('+id+',\''+esc(entry.id||'')+'\')" style="margin-top:4px"><i class="fas fa-trash mr1" aria-hidden="true"></i>Excluir</button>' +
         '</div>';
@@ -1245,12 +1550,14 @@ function openDetail(id){
     '<div class="dfields2">' +
     '<div class="dfield"><label>Tipo</label><div class="dval">'+esc(e.tipo)+'</div></div>' +
     '<div class="dfield"><label>Fabricante</label><div class="dval">'+(e.fabricante&&e.fabricante!=='-'?esc(e.fabricante):'—')+'</div></div>' +
+    '<div class="dfield"><label>Modelo</label><div class="dval">'+(e.modelo?esc(e.modelo):'—')+'</div></div>' +
     '<div class="dfield"><label>Capacidade</label><div class="dval">'+btuK+' / '+kw+'</div></div>' +
     '<div class="dfield"><label>Tensão</label><div class="dval">'+(e.tensao||'—')+'V</div></div>' +
     '<div class="dfield"><label>Corrente</label><div class="dval">'+(e.correnteNominal||'—')+'A</div></div>' +
     '<div class="dfield"><label>h/semana</label><div class="dval">'+(horas||'—')+'h</div></div>' +
     '</div>' +
     (e.patrimonio?'<div class="dfield"><label>Patrimônio</label><div class="dval">'+esc(e.patrimonio)+'</div></div>':'') +
+    (e.refrigerante?'<div class="dfield"><label>Refrigerante</label><div class="dval">'+esc(e.refrigerante)+'</div></div>':'') +
     (e.obs?'<div class="dfield" style="margin-top:4px"><label>Observações</label><div class="dval" style="color:#E52207;font-weight:600">'+esc(e.obs)+'</div></div>':'') +
     '</div>' +
     '<div class="ds">' +
@@ -1264,10 +1571,45 @@ function openDetail(id){
     logHtml;
 
   el('drawer-footer').innerHTML =
-    '<button class="btn-secondary" onclick="closeDrawer()" title="Fechar" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>' +
-    '<button class="btn-primary" onclick="openLogForm('+id+')"><i class="fas fa-plus mr1" aria-hidden="true"></i>Registrar OS/Manutenção</button>';
+    '<button class="btn-secondary btn-grow" onclick="closeDrawer()">Fechar</button>' +
+    (window._modoObservador ? '' : '<button class="btn-secondary btn-grow" onclick="openEquipForm('+id+')"><i class="fas fa-pen mr1" aria-hidden="true"></i>Editar equipamento</button>') +
+    '<button class="btn-primary btn-grow" onclick="openLogForm('+id+')"><i class="fas fa-plus mr1" aria-hidden="true"></i>Registrar OS/Manutenção</button>';
 
   openDrawer();
+}
+
+function atualizarAnaliseMedicoesForm(equipId){
+  var equip = DATA.find(function(r){ return r.id===equipId; });
+  var preview = el('log-medicoes-preview');
+  if(!equip || !preview) return;
+  var html = renderAnaliseMedicoes(equip, {
+    tempInsuflamento: val('log-temp-ins'),
+    tempRetorno: val('log-temp-ret'),
+    deltaT: val('log-delta-t'),
+    correnteMedida: val('log-corrente'),
+    pressaoSuccao: val('log-pressao')
+  });
+  var analise = analisarMedicoes(equip, {
+    tempInsuflamento: val('log-temp-ins'),
+    tempRetorno: val('log-temp-ret'),
+    deltaT: val('log-delta-t'),
+    correnteMedida: val('log-corrente'),
+    pressaoSuccao: val('log-pressao')
+  });
+  var delta = el('log-delta-t');
+  if(delta) delta.value = analise.deltaT==null ? '' : analise.deltaT;
+  preview.innerHTML = html || '<div class="hint">Sem medições informadas.</div>';
+}
+
+function atualizarCamposConclusaoForm(){
+  var ativa = deveAtualizarEquipNaConclusao({ tipo: val('log-tipo'), status: val('log-status') });
+  var wrap = el('log-equip-update');
+  var hint = el('log-conclusao-hint');
+  if(hint) hint.style.display = ativa ? 'none' : 'block';
+  if(!wrap) return;
+  wrap.querySelectorAll('select,textarea,input').forEach(function(campo){
+    campo.disabled = !ativa;
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1301,6 +1643,28 @@ function openLogForm(equipId){
     '<textarea class="fgt" id="log-desc" placeholder="Descreva os serviços, peças trocadas, pendências…"></textarea>' +
     '</div>' +
     '<div class="ds">' +
+    '<div class="ds-title"><i class="fas fa-thermometer-half mr1" aria-hidden="true"></i>Medições técnicas</div>' +
+    '<div class="fg2">' +
+    '<div><label class="fgl">Temperatura insuflada (°C)</label><input class="fgi" id="log-temp-ins" type="number" step="0.1" inputmode="decimal" placeholder="Opcional"/></div>' +
+    '<div><label class="fgl">Temperatura retorno (°C)</label><input class="fgi" id="log-temp-ret" type="number" step="0.1" inputmode="decimal" placeholder="Opcional"/></div>' +
+    '<div><label class="fgl">ΔT calculado (°C)</label><input class="fgi" id="log-delta-t" type="number" step="0.1" readonly placeholder="Automático"/></div>' +
+    '<div><label class="fgl">Corrente medida (A)</label><input class="fgi" id="log-corrente" type="number" step="0.1" inputmode="decimal" placeholder="Opcional"/></div>' +
+    '<div class="fg-full"><label class="fgl">Pressão de sucção (psi)</label><input class="fgi" id="log-pressao" type="number" step="0.1" inputmode="decimal" placeholder="Opcional"/></div>' +
+    '<div class="fg-full hint">Registre quando a OS exigir medição. O app compara ΔT com 10–14 °C, corrente com ±10% da nominal e, se o refrigerante estiver cadastrado, a sucção com a faixa típica do gás.</div>' +
+    '</div>' +
+    '<div id="log-medicoes-preview" class="med-preview"></div>' +
+    '</div>' +
+    '<div class="ds">' +
+    '<div class="ds-title"><i class="fas fa-sync-alt mr1" aria-hidden="true"></i>Atualizar equipamento ao concluir preventiva/corretiva</div>' +
+    '<div id="log-equip-update" class="fg2">' +
+    '<div><label class="fgl">Funciona</label><select class="fgs" id="log-equip-funciona">'+optionsHtml(['OK','NOK','VERIFICAR'], e.funciona, 'Selecione')+'</select></div>' +
+    '<div><label class="fgl">Estado</label><select class="fgs" id="log-equip-estado">'+optionsHtml(['NOVA','SEMI','VELHA'], e.estado, 'Selecione')+'</select></div>' +
+    '<div><label class="fgl">Criticidade</label><select class="fgs" id="log-equip-criticidade">'+optionsHtml(['CRÍTICA','ALTA','MÉDIA','BAIXA'], valorCriticidadeEquip(e))+'</select></div>' +
+    '<div class="fg-full"><label class="fgl">Observações atualizadas</label><textarea class="fgt" id="log-equip-obs" placeholder="Situação do equipamento após a intervenção">'+esc(e.obs||'')+'</textarea></div>' +
+    '</div>' +
+    '<div id="log-conclusao-hint" class="hint">Esses campos só são aplicados quando a OS for concluída e o tipo for PREVENTIVA ou CORRETIVA.</div>' +
+    '</div>' +
+    '<div class="ds">' +
     '<div class="ds-title"><i class="fas fa-tasks mr1" aria-hidden="true"></i>Checklist PMOC — '+esc(e.tipo)+'</div>' +
     chkHtml +
     '<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">' +
@@ -1311,9 +1675,19 @@ function openLogForm(equipId){
   el('drawer-body').querySelectorAll('.chk-item input').forEach(function(chk){
     chk.addEventListener('change', updateChkCnt);
   });
+  ['log-temp-ins','log-temp-ret','log-corrente','log-pressao'].forEach(function(id){
+    var campo = el(id);
+    if(campo) campo.addEventListener('input', function(){ atualizarAnaliseMedicoesForm(equipId); });
+  });
+  ['log-tipo','log-status'].forEach(function(id){
+    var campo = el(id);
+    if(campo) campo.addEventListener('change', atualizarCamposConclusaoForm);
+  });
   el('drawer-footer').innerHTML =
-    '<button class="btn-secondary" onclick="openDetail('+equipId+')">Cancelar</button>' +
-    '<button class="btn-primary" onclick="saveLogEntry('+equipId+','+clist.length+')"><i class="fas fa-save mr1" aria-hidden="true"></i>Salvar</button>';
+    '<button class="btn-secondary btn-grow" onclick="openDetail('+equipId+')">Cancelar</button>' +
+    '<button class="btn-primary btn-grow" onclick="saveLogEntry('+equipId+','+clist.length+')"><i class="fas fa-save mr1" aria-hidden="true"></i>Salvar</button>';
+  atualizarAnaliseMedicoesForm(equipId);
+  atualizarCamposConclusaoForm();
 }
 
 function updateChkCnt(){
@@ -1335,13 +1709,39 @@ async function saveLogEntry(equipId, clistLen){
   if (window._modoObservador) { showToast('Modo somente leitura', ''); return; }
   var date=val('log-date'), tipo=val('log-tipo'), status=val('log-status');
   if(!date||!tipo){ showToast('Preencha data e tipo','error'); return; }
+  var equip = DATA.find(function(r){ return r.id===equipId; });
   var checklist=[];
   for(var i=0;i<clistLen;i++){
     var chk=el('chk-'+i);
     var lbl=el('drawer-body').querySelectorAll('.chk-item span')[i];
     if(chk&&lbl) checklist.push({i:i,label:lbl.textContent.trim(),done:chk.checked});
   }
-  await addLogEntryAsync(equipId,{date:date,tipo:tipo,status:status,tecnico:val('log-tec').trim(),desc:val('log-desc').trim(),checklist:checklist});
+  var medicoes = analisarMedicoes(equip, {
+    tempInsuflamento: val('log-temp-ins'),
+    tempRetorno: val('log-temp-ret'),
+    deltaT: val('log-delta-t'),
+    correnteMedida: val('log-corrente'),
+    pressaoSuccao: val('log-pressao')
+  });
+  var logId = await addLogEntryAsync(equipId,{
+    date:date,tipo:tipo,status:status,tecnico:val('log-tec').trim(),desc:val('log-desc').trim(),checklist:checklist,
+    tempInsuflamento: medicoes.tempInsuflamento,
+    tempRetorno: medicoes.tempRetorno,
+    deltaT: medicoes.deltaT,
+    correnteMedida: medicoes.correnteMedida,
+    pressaoSuccao: medicoes.pressaoSuccao
+  });
+  if(!logId) return;
+  var patchConclusao = montarPatchConclusaoManutencao(equip || {}, {
+    date: date,
+    tipo: tipo,
+    status: status,
+    funciona: val('log-equip-funciona'),
+    estado: val('log-equip-estado'),
+    criticidade: val('log-equip-criticidade'),
+    obs: val('log-equip-obs')
+  });
+  if(patchConclusao) await saveEquipAsync(equipId, patchConclusao);
   showToast('OS registrada com sucesso','ok');
   openDetail(equipId);
   // Refresh
@@ -2245,9 +2645,10 @@ function dvSetTarifa(v){
 function dvRenderCharts(){
   var host = el('dash-charts');
   if(!host){
+    var kpi = el('kpi-area');
+    if(!kpi) return;
     host = document.createElement('div');
     host.id = 'dash-charts';
-    var kpi = el('kpi-area');
     kpi.insertAdjacentElement('afterend', host);
   }
   var ativos = DATA.filter(function(e){ return e.tipo!=='RETIRADO'; });
